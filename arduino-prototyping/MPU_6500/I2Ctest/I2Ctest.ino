@@ -26,7 +26,7 @@ void loop()
   uint16_t val = 0;
   
   //writeRegister(35,0x08);
-  r//eadRegister(60);
+  //readRegister(60);
   high = readRegister(63);
   low = readRegister(64);
   val = (high<<8)+low;
