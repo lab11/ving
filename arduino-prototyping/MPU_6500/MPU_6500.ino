@@ -21,18 +21,12 @@ SoftwareSerial OpenLog(4, 3); //Soft RX on 4, Soft TX out on 3
    byte test = 0;
    uint16_t time;
 
-//-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-//Connect TXO of OpenLog to pin 3, RXI to pin 2
-//SoftwareSerial(rxPin, txPin)
-
-//-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-
 int ledPin = 19;
 
 
 void setup() {                
   pinMode(ledpin, OUTPUT);
-  Serial.begin(9600);
+  Serial.begin(115200);
  
   // start the SPI library:
   SPI.begin();
@@ -74,7 +68,7 @@ void loop() {
     testh = readRegister(59, 1);
     testl = readRegister(60, 1);
     //delay(10);
-    acc_full = ((testh << 8) | testl);
+    acc_full = (testh);
     //test = readRegister(0x75, 0); //Reg 117
     //dataReadyL = readRegister(0x73, 1); //Read from FIFO_CNT_L 
     //dataReadyH = readRegister(0x72, 1); //Read from FIF0_CNT 0x72, latch new value
@@ -108,7 +102,7 @@ void loop() {
    Serial.print("   ACC_X[1]=");
    Serial.println(acc_X[1]);*/
     //Serial.print("   Test =");
-    Serial.println((int)(acc_full));
+    Serial.println((acc_full));
 }
 
 //Read from or write to register from the SCP1000:
