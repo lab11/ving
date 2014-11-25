@@ -1,0 +1,17 @@
+{
+    "name": "Serial Grapher",
+    "main": "index.html",
+    "version": "0.1.0",
+    "description": "Getting Serial data and turning it into a realt time graph",
+    "keywords": "node-webkit",
+    "window": {
+        "title": "Acclerometer Grapher",
+        "width": 800,
+        "height": 600,
+        "position": "center",
+        "resizable": true,
+        "toolbar": true,
+        "frame": true,
+        "fullscreen": false
+    }
+}

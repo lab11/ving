@@ -1,0 +1,251 @@
+<html>
+<head>
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+	<title>Serial Data Logger</title>
+	<link href="examples.css" rel="stylesheet" type="text/css">
+	<script language="javascript" type="text/javascript" src="./node_modules/flot/jquery.js"></script>
+	<script language="javascript" type="text/javascript" src="Queue.js"></script>
+	<script language="javascript" type="text/javascript" src="./node_modules/flot/jquery.flot.js"></script>
+	<script language="javascript" type="text/javascript" src="./dsp.js/dsp.js"></script>
+	<script type="text/javascript">
+
+	$(function() {
+    
+        var dataQ = new Queue();
+        var maxSize = 512;
+    
+        
+        for(var i = 0; i < maxSize; i++) {
+            dataQ.enqueue(0);
+        }
+
+
+        var fft = new RFFT(256, 1000);
+
+        var serialPort = require('serialport');
+        var SerialPort = serialPort.SerialPort;
+    
+        refresh();
+
+        function refresh() {
+            serialPort.list(function(err, ports) {
+
+                var portsPath = document.getElementById("portPath");
+
+                //Clear options
+                for(var i = 0; i < portsPath.options.length; i++){
+                    portsPath.options[i] = null;
+                }
+
+                if (err) {
+                    console.log("Error listing ports", err);
+                    portsPath.options[0] = new Option(err, "ERROR:" + err);
+                    portsPath.options[0].selected = true;
+                    return;
+                } else {
+                    for(var i = 0; i < ports.length; i++) {
+                        portsPath.options[i] = new Option(ports[i].comName, ports[i].comName);
+                        if(ports[i].comName.toLowerCase().indexOf("usb") !== -1) {
+                            portsPath.options[i].selected = true; 
+                        }
+                    }
+
+
+                    var connectButton = document.getElementById("connect");
+                    connectButton.onclick = function() {
+                        var port = portsPath.options[portsPath.selectedIndex].value;
+                        var baudrateElement = document.getElementById("baudrate");
+                        var baudrate = baudrateElement.options[baudrateElement.selectedIndex].value;
+                        connect(port, baudrate);
+
+                    };
+                }
+            });
+        }
+
+        var refreshButton = document.getElementById("refresh");
+        refreshButton.onclick = function() {
+            refresh();
+        }
+    
+            
+        function connect(port, baudrate) {
+            
+            console.log(dataQ.getLength());
+            
+            var baud = 115200;
+            if (baudrate) {
+               baud = baudrate; 
+            }
+
+            var sp = new SerialPort(port, {
+                baudrate: baud,
+                parser: serialPort.parsers.readline("\r\n")
+            }, true);
+
+            sp.on("open" ,function() {
+                console.log('Opened port' + port);
+            });
+
+            sp.on("data", function(data) {
+
+                if(dataQ.getLength() < maxSize) {
+                    dataQ.enqueue(parseInt(data)); 
+                } else {
+                    dataQ.dequeue();
+                    dataQ.enqueue(parseInt(data)); 
+                }
+                update();
+            });
+
+            sp.on("close", function() {
+                refresh();
+            });
+
+        }
+
+        
+		// Set up the control widget
+		var updateInterval = 30;
+		$("#updateInterval").val(updateInterval).change(function () {
+			var v = $(this).val();
+			if (v && !isNaN(+v)) {
+				updateInterval = +v;
+				if (updateInterval < 1) {
+					updateInterval = 1;
+				} else if (updateInterval > 2000) {
+					updateInterval = 2000;
+				}
+				$(this).val("" + updateInterval);
+			}
+		});
+
+		var plot = $.plot("#accel", [ zipData() ], {
+			series: {
+				shadowSize: 0	// Drawing is faster without shadows
+			},
+			yaxis: {
+				min: 14000,
+				max: 22000
+			},
+			xaxis: {
+				show: false
+			}
+		});
+
+        var plot2 = $.plot("#fft", [fftData()], {
+            series: {
+                shadowSize: 0
+            },
+            yaxis: {
+                min: -50,
+                max: 50
+            },
+            xaxis: {
+                min: 0,
+                max: 128
+            }
+        });
+
+        function zipData() {
+			var res = [];
+			for (var i = 0; i < dataQ.getLength(); ++i) {
+                var temp = dataQ.dequeue();
+				res.push([i, temp]);
+                dataQ.enqueue(temp);
+			}
+
+			return res;
+        }
+
+        function fftData() {
+            var tempQ = new Queue();
+            tempQ = dataQ;
+
+            var signal = [];
+            for(var i = 0; i < 256; i++) {
+                signal.push(tempQ.dequeue());
+            }
+
+            fft.forward(signal);
+            var spectrum = fft.spectrum;
+               
+            var ret = [];
+            for(var i = 0; i < spectrum.length; i++){
+                ret.push([i, spectrum[i]]);
+            }
+
+            return ret;
+        }
+
+		function update() {
+			plot.setData([zipData()]);
+            //plot2.setData([fftData()]);
+			// Since the axes don't change, we don't need to call plot.setupGrid()
+			plot.draw();
+            plot2.draw();
+			//setTimeout(update, updateInterval);
+		}
+
+		//update();
+
+		// Add the Flot version string to the footer
+
+		$("#footer").prepend("Flot " + $.plot.version + " &ndash; ");
+	});
+
+	</script>
+
+</head>
+<body>
+	<div id="content">
+        <div class="page-header" style="width:80%; height: 40px; padding-left:15px;">
+            <div id="settings" class="row">
+                <div class="col-sm-3" style="width: auto; float: left; padding-right:15px;">
+                    <label for="portPath" class="control-label">Port Path:</label>
+                    <select id="portPath" class="form-control"></select>
+                </div>
+                <div class="col-sm-3" style="width: auto; float: left; padding-right:15px;">
+                    <label for="baudrate">Baud Rate:</label>
+                    <select id="baudrate" class="form-control">
+                        <option value="115200" selected>115200</option>
+                        <option value="57600">57600</option>
+                        <option value="38400">38400</option>
+                        <option value="19200">19200</option>
+                        <option value="9600">9600</option>
+                        <option value="4800">4800</option>
+                        <option value="2400">2400</option>
+                        <option value="1800">1800</option>
+                        <option value="1200">1200</option>
+                        <option value="600">600</option>
+                        <option value="300">300</option>
+                        <option value="200">200</option>
+                        <option value="150">150</option>
+                        <option value="134">134</option>
+                        <option value="110">110</option>
+                        <option value="75">75</option>
+                        <option value="50">50</option>
+                    </select>
+                </div>
+
+                <div class="col-sm-3" style="width: auto; float: left; padding-right:15px;">
+                    <button id="connect" class="btn btn-primary">Connect</button>
+                </div>
+                <div class="col-sm-3" style="width: auto; float: left;">
+                    <button id="refresh" class="btn btn-primary">Refresh</button>
+                </div>
+            </div>
+        </div>
+            
+
+		<div class="demo-container">
+            <h2> Accelerometer Data </h2>
+			<div id="accel" class="demo-placeholder"></div>
+		</div>
+
+		<div class="demo-container">
+            <h2> FFT </h2>
+			<div id="fft" class="demo-placeholder"></div>
+		</div>
+</body>
+</html>
