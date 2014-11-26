@@ -11,14 +11,17 @@
 
 	$(function() {
     
-        var dataQ = new Queue();
         var maxSize = 512;
+        var dataQ = new Array(maxSize);
+        var bitQ = new Array(maxSize);
+        var i = 0;
+        while (i<maxSize) {
+            dataQ[i] = [0];
+            bitQ[i]  =[0];
+            i++;
+        }
     
         
-        for(var i = 0; i < maxSize; i++) {
-            dataQ.enqueue(0);
-        }
-
 
         var fft = new RFFT(256, 1000);
 
@@ -71,7 +74,6 @@
             
         function connect(port, baudrate) {
             
-            console.log(dataQ.getLength());
             
             var baud = 115200;
             if (baudrate) {
@@ -88,13 +90,14 @@
             });
 
             sp.on("data", function(data) {
-
-                if(dataQ.getLength() < maxSize) {
-                    dataQ.enqueue(parseInt(data)); 
-                } else {
-                    dataQ.dequeue();
-                    dataQ.enqueue(parseInt(data)); 
+                if(data.charAt(0) == 'a') {
+                    dataQ.shift();
+                    dataQ.push(parseInt(data.slice(1,data.length+1)));
+                } else if(data.charAt(0) == 'b') {
+                    bitQ.shift();
+                    bitQ.push(parseInt(data.slice(1,-1)));
                 }
+
                 update();
             });
 
@@ -133,7 +136,7 @@
 			}
 		});
 
-        var plot2 = $.plot("#fft", [fftData()], {
+        var plot2 = $.plot("#fft", [zipData()], {
             series: {
                 shadowSize: 0
             },
@@ -148,17 +151,24 @@
         });
 
         function zipData() {
-			var res = [];
-			for (var i = 0; i < dataQ.getLength(); ++i) {
-                var temp = dataQ.dequeue();
-				res.push([i, temp]);
-                dataQ.enqueue(temp);
+			var res = new Array(maxSize);
+			for (var i = 0; i < 512; ++i) {
+				res[i] = [i, dataQ[i]];
 			}
 
 			return res;
         }
 
-        function fftData() {
+        function zipBits() {
+			var res = new Array(maxSize);
+			for (var i = 0; i < 512; ++i) {
+				res[i] = [i, bitQ[i]];
+			}
+
+            return res;
+        }
+
+    /*    function fftData() {
             var tempQ = new Queue();
             tempQ = dataQ;
 
@@ -176,15 +186,14 @@
             }
 
             return ret;
-        }
+        }*/
 
 		function update() {
 			plot.setData([zipData()]);
-            //plot2.setData([fftData()]);
+            plot2.setData([zipBits()]);
 			// Since the axes don't change, we don't need to call plot.setupGrid()
 			plot.draw();
             plot2.draw();
-			//setTimeout(update, updateInterval);
 		}
 
 		//update();
