@@ -1,0 +1,274 @@
+#define ARM_MATH_CM4
+#define MPU_ADDRESS 0x68
+#define SAMPLE_RATE_HZ 1000
+#define FFT_SIZE 64
+#define Z_LOW 64
+#define Z_HIGH 63
+#define SPI_BAUD 1000000
+#define CHANNEL 0
+#define READ_RES 16
+
+#include asf.h
+#include arm_math.h
+#include tc.h
+#include pio.h
+#include spi.h
+#include spi_master.h
+#include conf_clock.h
+
+static void configure_console(void);
+void writeRegister(uint8_t reg, uint8_t val);
+status_code_t readRegister(uint8_t reg, uint8_t val, int bytesToRead);
+void spi_init(void);
+void console_write(char input, int len);
+static void tc_config(uint32_t freq_desired);
+ void shiftLeft(void);
+ void copyArray(void);
+
+Global variables
+int LEVEL = 0;
+status_code_t status;
+uint8_t dataTx[] = abcd;
+uint32_t SPIselect = 1;
+
+struct spi_device CHANNEL_0 = {.id = 0};
+char buffer[255];
+char print_buf[255];
+uint8_t rx_data[2];
+
+FFT globals
+ q31_t samples_fix[FFT_SIZE2];
+ q31_t samples_hold[FFT_SIZE2];
+ q31_t magnitudes_fix[FFT_SIZE];
+ q31_t max_finder[FFT_SIZE];
+ 
+ volatile uint8_t high = 0;
+ volatile uint8_t low = 0;
+ q31_t val = 0;
+ q31_t max_val = 0;
+ uint32_t max_index = 0;
+ volatile int dom_freq_h = 0;
+ volatile int dom_freq_l = 0;
+ arm_cfft_radix4_instance_q31 fft_inst_fix;
+ volatile bool hasSampled = false;
+ volatile bool isDone = false;
+ int sampleCounter = 0;
+
+ Interrupt service routine
+ void TC0_Handler(void)
+{
+ 	if(!hasSampled) {
+ 		readRegister(Z_HIGH, &rx_data, 2);
+ 		val = (q31_t)((rx_data[0]8)+rx_data[1]); high  8 + low
+ 		val = (val  30-READ_RES);
+ 	}
+ 	shiftLeft();
+ 	samples_fix[FFT_SIZE2-2] = val;
+ 	samples_fix[FFT_SIZE2-1] = (q31_t)0;
+ 	copyArray();
+ 	sampleCounter +=2;
+ 	
+ 	if(sampleCounter  FFT_SIZE2)  {
+      hasSampled = true;
+      isDone = true;
+      sampleCounter = 0;
+    }
+    	sprintf(print_buf, %d - %d  Val %d, dom_freq_l, dom_freq_h, max_val);
+    	console_write(print_buf, sizeof(print_buf));
+	
+	uint32_t dummy;
+	dummy = tc_get_status(TC0,CHANNEL);
+
+	readRegister(Z_HIGH, &rx_data, 2);
+	
+	uint16_t total = (rx_data[0]  8) + rx_data[1];
+	readRegister(Z_HIGH, &rx_data, 2);
+	sprintf(buffer, Z_HIGH %xtZ_LOW %xtZ_VAL %d rn, rx_data[0], rx_data[1], total);
+	console_write(buffer, sizeof(buffer));
+	ioport_toggle_pin_level(LED_0_PIN);
+}
+
+int main(void)
+{
+	 Initialize the SAM system 
+	sysclk_init();
+
+	 Initialize the board 
+	board_init();
+
+	 Initialize the console UART 
+	configure_console();
+	
+	Initialize SPI
+	spi_init();
+	writeRegister(26, 0x00); Config reg
+	writeRegister(28, 0x00); Accel config
+	writeRegister(29, 0x08); Config2
+	writeRegister(35, 0x00); FIFO enable 0x08
+	writeRegister(106, 0x50); User control 0101 0000
+	writeRegister(107, 0x00);Power managment 0000 0000
+	writeRegister(108, 0x1F); Disable all axis and gryo except ACC_X 0001 1111
+	writeRegister(108, 0x00); Enable all axis and gryo
+	
+	Initialize FFT Sampling
+	int status = arm_cfft_radix4_init_q31(&fft_inst_fix, FFT_SIZE, 0, 1); Selects forward transform and bit reversal of output
+ 	if (status == ARM_MATH_ARGUMENT_ERROR){
+ 		puts(FFT INIT ERROR!);
+ 	}
+	
+	Configure timer interrupts
+	tc_config(SAMPLE_RATE_HZ);
+	NVIC_DisableIRQ(TC0_IRQn);
+	NVIC_ClearPendingIRQ(TC0_IRQn);
+	NVIC_SetPriority(TC0_IRQn,0);
+	NVIC_EnableIRQ(TC0_IRQn);
+
+	while (1) {
+		puts(hello world);
+ 		 if (hasSampled) {
+ 			Calculate the FFT of samples and upscale output by 6 bits to retain q31_t data format
+ 			arm_cfft_radix4_q31(&fft_inst_fix, samples_hold);
+ 
+ 			 Calculate magnitude of complex numbers outq31put by the FFT.
+ 			arm_cmplx_mag_q31(samples_hold, magnitudes_fix, FFT_SIZE);
+        
+ 			Serial.print(Sample );
+ 			Serial.println((magnitudes_fix[0]  (30-READ_RES)), DEC);
+    
+  			for (int i = 0; i  FFT_SIZE2; ++i) {
+  			  max_finder[i] = magnitudes_fix[i];
+  			}
+      
+  			max_finder[0] = 0;
+  			arm_max_q31(max_finder, FFT_SIZE, &max_val, &max_index);
+      
+  			dom_freq_l = (SAMPLE_RATE_HZFFT_SIZE)max_index;
+  			dom_freq_h = dom_freq_l + (SAMPLE_RATE_HZFFT_SIZE);
+ 			
+  			sprintf(print_buf, %d - %d  Val %d, dom_freq_l, dom_freq_h, max_val);
+  			console_write(print_buf, sizeof(print_buf));
+ 			Serial.println(((max_val  (30-READ_RES))32767.0)1.8);
+     
+ 			hasSampled = false;
+ 			isDone = false;
+ 		  }
+	}
+}
+
+   brief Configure the Console UART.
+ 
+ 
+void console_write(char input, int len){
+	for(int i = 0; i  len; i++) {
+		while(!uart_is_tx_buf_empty(UART1));
+		uart_write(UART1, input[i]);
+	}
+	return;
+}
+static void configure_console(void)
+{
+	const usart_serial_options_t uart_serial_options = {
+		.baudrate = CONF_UART_BAUDRATE,
+#ifdef CONF_UART_CHAR_LENGTH
+		.charlength = CONF_UART_CHAR_LENGTH,
+#endif
+		.paritytype = CONF_UART_PARITY,
+#ifdef CONF_UART_STOP_BITS
+		.stopbits = CONF_UART_STOP_BITS,
+#endif
+	};
+
+	 Configure console UART. 
+	sysclk_enable_peripheral_clock(CONSOLE_UART_ID);
+	stdio_serial_init(CONF_UART, &uart_serial_options);
+}
+
+void spi_init(void) {
+	Initialize SPI
+	gpio_configure_pin(PIO_PA3_IDX, PIO_PERIPH_A  PIO_DEFAULT); SPI MISO PA12 PERF A
+	gpio_configure_pin(PIO_PA4_IDX, PIO_PERIPH_A  PIO_DEFAULT); SPI MOSI PA13 PERF A
+	gpio_configure_pin(PIO_PA11_IDX, PIO_PERIPH_A  PIO_DEFAULT); SPI NPCS PA11 PERF A
+
+	Enable clock
+	pmc_enable_periph_clk(ID_SPI);
+
+	 	Mode CPOL NCPHA SHIFTEDGE CAPTUREEDGE INACTIVELEVEL
+	 	0 0 1 Falling Rising Low
+	 	1 0 0 Rising Falling Low
+	 	2 1 1 Rising Falling High
+	 	3 1 0 Falling Rising High
+
+	
+	spi_master_init(SPI);
+	spi_master_setup_device(SPI, &CHANNEL_0, SPI_MODE_3, SPI_BAUD, SPIselect); mySPIselect is not used
+	spi_enable(SPI);
+	
+}
+
+void writeRegister(uint8_t reg, uint8_t val) {
+	uint8_t data_Tx = reg;
+	spi_select_device(SPI, &CHANNEL_0);
+	uint8_t data_Tx[2] = {reg, val};
+	spi_write_packet(SPI, data_Tx, 2);
+	spi_write_single(SPI, reg);
+	spi_write_single(SPI, val);
+	spi_deselect_device(SPI, &CHANNEL_0);
+	return status;
+}
+
+status_code_t readRegister(uint8_t reg, uint8_t val, int bytesToRead){
+	uint8_t inByte = 0;
+	uint8_t REG_ADDR_R = reg  0x80;
+	
+	spi_select_device(SPI, &CHANNEL_0);
+	spi_write_single(SPI, REG_ADDR_R);
+	status = spi_read_packet(SPI, val, bytesToRead);
+	spi_deselect_device(SPI, &CHANNEL_0);
+	return status;
+}
+
+ Configuration function for the Timer.
+static void tc_config(uint32_t freq_desired)
+{
+	 INPUTS
+		freq_desired	The desired rate at which to call the ISR, Hz.
+	
+	uint32_t ul_div;
+	uint32_t ul_tcclks;
+	uint32_t ul_sysclk = sysclk_get_cpu_hz();
+	uint32_t counts;	
+	
+	 Configure PMC				
+	pmc_enable_periph_clk(ID_TC0);
+
+	 Configure TC for a 4Hz frequency and trigger on RC compare.
+	tc_find_mck_divisor(
+		(uint32_t)freq_desired,	 The desired frequency as a uint32. 
+		ul_sysclk,				 Master clock freq in Hz.
+		&ul_div,				 Pointer to register where divisor will be stored.
+		&ul_tcclks,				 Pointer to reg where clock selection number is stored.
+		ul_sysclk);				 Board clock freq in Hz.
+	tc_init(TC0, CHANNEL, ul_tcclks  TC_CMR_CPCTRG);
+	
+	 Find the best estimate of counts, then write it to TC register C.
+	counts = (ul_sysclkul_div)freq_desired;	
+	tc_write_rc(TC0, 0, counts);						
+
+	 Enable interrupts for this TC, and start the TC.		
+	tc_enable_interrupt(TC0, CHANNEL,TC_IER_CPCS);				 Enable interrupt.
+	tc_start(TC0,CHANNEL);			 Start the TC.
+
+}
+
+ void shiftLeft(void) {  
+   for(int i = 0; i  FFT_SIZE2; i++)
+   {
+     samples_fix[i] = samples_fix[i+2];
+   }
+ }
+ 
+ void copyArray(void) {
+   for(int i = 0; i  FFT_SIZE2; i++) {
+     samples_hold[i] = samples_fix[i];
+   }
+ }
