@@ -171,9 +171,25 @@ int main(void)
 			 
 			 // Calculate magnitude of complex numbers outq31put by the FFT.
  			arm_cmplx_mag_q31(samples_fix, magnitudes_fix, FFT_SIZE);
-			NVIC_EnableIRQ(TC0_IRQn);
+			
+			for (int i = 0; i < FFT_SIZE/2; ++i) {
+			  max_finder[i] = magnitudes_fix[i];
+			}
+			
+		
 			 
-			sprintf(print_buf, "magnitudes[0] \t %d \r\n", magnitudes_fix[0]);
+			//sprintf(print_buf, "magnitudes[0] \t %d \r\n", magnitudes_fix[0]);
+			//console_write(print_buf, sizeof(print_buf));
+			
+			max_finder[0] = 0;
+			arm_max_q31(max_finder, FFT_SIZE, &max_val, &max_index);
+    
+			dom_freq_l = (SAMPLE_RATE_HZ/FFT_SIZE)*max_index;
+			dom_freq_h = dom_freq_l + (SAMPLE_RATE_HZ/FFT_SIZE);
+			
+			NVIC_EnableIRQ(TC0_IRQn);
+			
+			sprintf(print_buf, "%d - %d  Val: %d \r\n", dom_freq_l, dom_freq_h, max_val);
 			console_write(print_buf, sizeof(print_buf));
 			 
 			int16_t total = (rx_data[0] << 8) + rx_data[1];
