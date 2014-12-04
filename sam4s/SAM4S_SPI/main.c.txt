@@ -86,7 +86,7 @@ volatile uint8_t low = 0;
 
 		if(tc_get_status(TC0,CHANNEL))
 		{
-			if (sampleCounter > FFT_SIZE*2-2) {
+			if (sampleCounter > 1) {
 				ioport_toggle_pin_level(LED_0_PIN);
 				//puts("Hello world \r\n");
 				NVIC_ClearPendingIRQ(TC0_IRQn);
@@ -101,15 +101,13 @@ volatile uint8_t low = 0;
 				readRegister(Z_HIGH, &rx_data, 2);
 				val = (q31_t)((rx_data[0]<<8)+rx_data[1]); //high << 8 + low
 				val = (val << 30-READ_RES);
-				samples_fix[sampleCounter] = val;
-				samples_fix[sampleCounter+1] = (q31_t)0;
+				
+				shiftLeft();
+				samples_fix[FFT_SIZE*2-2] = val;
+				samples_fix[FFT_SIZE*2-1] = (q31_t)0;
+				copyArray();
+				
 				sampleCounter +=2;
-			
-				if(sampleCounter > FFT_SIZE*2-2)  {
-				 hasSampled = true;
-				 isDone = true;
-				 //sampleCounter = 0;
-				 }//End if
 			}//End else
 		}//End status
 
@@ -159,25 +157,22 @@ int main(void)
 
 	while(1) {
 		
-		 if(sampleCounter < FFT_SIZE*2-2) {
+		 if(sampleCounter < 1) {
 			sprintf(print_buf, "Sample_c: %d \r\n", sampleCounter);
 			//console_write(print_buf, sizeof(print_buf));
 		 }
 		 else{
-			 isDone = false;
 			 NVIC_DisableIRQ(TC0_IRQn);
 			 
-			 arm_cfft_radix4_q31(&fft_inst_fix, samples_fix);
+			 arm_cfft_radix4_q31(&fft_inst_fix, samples_hold);
 			 
 			 // Calculate magnitude of complex numbers outq31put by the FFT.
- 			arm_cmplx_mag_q31(samples_fix, magnitudes_fix, FFT_SIZE);
+ 			arm_cmplx_mag_q31(samples_hold, magnitudes_fix, FFT_SIZE);
 			
 			for (int i = 0; i < FFT_SIZE/2; ++i) {
 			  max_finder[i] = magnitudes_fix[i];
 			}
 			
-		
-			 
 			//sprintf(print_buf, "magnitudes[0] \t %d \r\n", magnitudes_fix[0]);
 			//console_write(print_buf, sizeof(print_buf));
 			
@@ -308,15 +303,15 @@ static void tc_config(uint32_t freq_desired)
 
 }
 
-// void shiftLeft(void) {  
-//   for(int i = 0; i < FFT_SIZE*2; i++)
-//   {
-//     samples_fix[i] = samples_fix[i+2];
-//   }
-// }
-// 
-// void copyArray(void) {
-//   for(int i = 0; i < FFT_SIZE*2; i++) {
-//     samples_hold[i] = samples_fix[i];
-//   }
-// }
+void shiftLeft(void) {  
+  for(int i = 0; i < FFT_SIZE*2; i++)
+  {
+    samples_fix[i] = samples_fix[i+2];
+  }
+}
+
+void copyArray(void) {
+  for(int i = 0; i < FFT_SIZE*2; i++) {
+    samples_hold[i] = samples_fix[i];
+  }
+}
