@@ -10,154 +10,35 @@
  * Atmel Software Framework (ASF).
  */
 
-#include <asf.h>
-#include "spi.h"
-#include "spi_master.h"
-#include "arm_math.h"
-#include "pio.h"
-#include "tc.h"
-
-#define CHANNEL0 0
-#define CHANNEL1 1
-#define READ_RES 16
-#define SAMPLE_RATE_HZ 1000
-#define PULSE_RATE_HZ 40
-#define FFT_SIZE 64
-#define FILTER_LOW 100
-#define FILTER_HIGH 500
-#define BIN_SIZE (SAMPLE_RATE_HZ/FFT_SIZE)
-
-int HIGH_COUNTER = 0;
-int HIGH_DIV = (SAMPLE_RATE_HZ/PULSE_RATE_HZ);
-int SAMPLE_COUNTER= 0;
-
-status_code_t status;
-uint32_t SPIselect = 1;
-int TOGGLE_S = 0;
-int TOGGLE_M = 0;
-
-#define ERROR_MESSAGE "INIT ERROR \r\n"
-#define INIT_SUCCESS "INIT SUCCESS \r\n"
-#define BREAKER "\r\n--------------------------------------\r\n"
-
-// =============== UART1 =============== 
-#define UART_SERIAL_BAUDRATE        57600
-#define UART_SERIAL_CHANNEL_MODE	UART_MR_CHMODE_NORMAL
-#define UART_SERIAL_MODE			UART_MR_PAR_NO
-
-
-#define PINS_UART0          (PIO_PA9A_URXD0 | PIO_PA10A_UTXD0)
-#define PINS_UART0_FLAGS    (PIO_PERIPH_A | PIO_DEFAULT)
-#define PINS_UART0_MASK     (PIO_PA9A_URXD0 | PIO_PA10A_UTXD0)
-#define PINS_UART0_PIO      PIOA
-#define PINS_UART0_ID       ID_PIOA
-#define PINS_UART0_TYPE     PIO_PERIPH_A
-#define PINS_UART0_ATTR     PIO_DEFAULT
-
-//=================SPI==================
-#define SPI_BAUD 1000000
-#define Z_LOW 64
-#define Z_HIGH 63
-#define PINS_SPI          (PIO_PA12A_MISO | PIO_PA13A_MOSI|PIO_PA11A_NPCS0 |PIO_PA14A_SPCK)
-#define PINS_SPI_FLAGS    (PIO_PERIPH_A | PIO_DEFAULT)
-#define PINS_SPI_MASK     (PIO_PA12A_MISO | PIO_PA13A_MOSI| PIO_PA11A_NPCS0 | PIO_PA14A_SPCK)
-#define PINS_SPI_PIO      PIOA
-#define PINS_SPI_ID       ID_PIOA
-#define PINS_SPI_TYPE     PIO_PERIPH_A
-#define PINS_SPI_ATTR     PIO_DEFAULT
-struct spi_device CHANNEL_0 = {.id = 0};
-char buffer[255];
-char print_buf[255];
-uint8_t rx_data[2];
-
-//=================Function Definitions================
-void writeRegister(uint8_t reg, uint8_t val);
-status_code_t readRegister(uint8_t reg, uint8_t* val, int bytesToRead);
-void spi_init(void);
-void console_write(char* input, int len);
-void shiftLeft(void);
-void copyArray(void);
-void toggle(uint32_t LED_INPUT);
-void toggle_motor(uint32_t MOTOR_INPUT);
-void pwm_init_start(void);
-void on_off_key(void);
-void tc_config(uint32_t freq_desired, Tc* TCn, uint32_t CHANNEL, uint32_t PER_ID);
-
-//=================PWM============================
-//PWM, pa0 LRA, pa1 ERM PWM
-#define ERM_on_off PIO_PA30
-#define LRA_on_off PIO_PA31
-
-pwm_channel_t g_pwm_channel_led;
-
-#define PINS_PWM0          (PIO_PA0A_PWMH0)
-#define PINS_PWM0_FLAGS    (PIO_PERIPH_A | PIO_DEFAULT)
-#define PINS_PWM0_MASK     (PIO_PA0A_PWMH0)
-#define PINS_PWM0_PIO      PIOA
-#define PINS_PWM0_ID       ID_PIOA
-#define PINS_PWM0_TYPE     PIO_PERIPH_A
-#define PINS_PWM0_ATTR     PIO_DEFAULT
-
-/** PWM frequency in Hz */
-#define PWM_FREQUENCY      50000
-/** Period value of PWM output waveform */
-#define PERIOD_VALUE      100
-/** Initial duty cycle value */
-#define INIT_DUTY_VALUE    30 //40 is off, 30, is slightly on, 0 is full on
-
-//=================FFT Globals================
-q31_t samples_fix[FFT_SIZE*2];
-q31_t samples_hold[FFT_SIZE*2];
-q31_t magnitudes_fix[FFT_SIZE];
-q31_t max_finder[FFT_SIZE];
-
-q31_t holder[1000];
-
-volatile uint8_t high = 0;
-volatile uint8_t low = 0;
-q31_t val = 0;
-q31_t max_val = 0;
-uint32_t max_index = 0;
-volatile int dom_freq_h = 0;
-volatile int dom_freq_l = 0;
-const arm_cfft_radix4_instance_q31 fft_inst_fix;
-volatile int hasSampled = false;
-volatile int isDone = false;
-int sampleCounter = 0;
-
-
+#include "main.h"
 //Interrupt service routine called by timer interrupt at frequency SAMPLE_RATE_HZ
 void TC0_Handler(void)
 {
 	if(tc_get_status(TC0,CHANNEL0)){
-		if (sampleCounter > 1) {
-			//NVIC_ClearPendingIRQ(TC0_IRQn);
-			sampleCounter = 0;
-		}//End if
-		else {
-			//NVIC_ClearPendingIRQ(TC0_IRQn);
-
+		if(RX){
+			if (TOTAL_COUNTER > GOAL_SAMPLES){
+				samples_done = 1;
+			}
 			readRegister(Z_HIGH, &rx_data, 2);
 			val = (q31_t)((rx_data[0]<<8)+rx_data[1]); //high << 8 + low
 			val = (val << 30-READ_RES);
-
-			shiftLeft();
-			samples_fix[FFT_SIZE*2-2] = val;
-			samples_fix[FFT_SIZE*2-1] = (q31_t)0;
-			copyArray();
+			
+			holder[TOTAL_COUNTER] = val;
+			holder[TOTAL_COUNTER+1] = (q31_t)0;
+			
 			toggle(PIO_PB11);
-			sampleCounter +=2;
-		}//End else
-	}//End if Channel 1
-	
-	HIGH_COUNTER++;
-
-	if(HIGH_COUNTER > HIGH_DIV) {
-		HIGH_COUNTER = 0;
-		pio_set(PIOB, PIO_PB12);				on_off_key();
-	}
-	NVIC_ClearPendingIRQ(TC0_IRQn);
-
+			TOTAL_COUNTER+=2;
+		}
+		if(TX){
+			HIGH_COUNTER++;
+			if(HIGH_COUNTER > HIGH_DIV) {
+				HIGH_COUNTER = 0;
+				pio_set(PIOB, PIO_PB12);				if(message_to_send)
+					on_off_key();
+			}//End if HIGH_COUNTER
+		}
+		NVIC_ClearPendingIRQ(TC0_IRQn);
+	}//End get status
 }//End handler
 
 //  void PWM_Handler(void)
@@ -246,12 +127,16 @@ int main (void)
 	pio_set_output(PIOA, PIO_PA31, LOW, DISABLE, ENABLE);
 	pio_set_input(PIOB, PIO_PB1, PIO_PULLUP);
 	
-	//Initizlize PMC
+	//Initizlize PWM
 	pwm_init_start();
 	
 	//Initialzie Timer Interrupt
 	tc_config(SAMPLE_RATE_HZ, TC0, CHANNEL0, ID_TC0);
 	//tc_config(PULSE_RATE_HZ, TC0, CHANNEL1, ID_TC0);
+	
+	on_off_key();
+	delay_ms(100);
+
 	
 	NVIC_DisableIRQ(TC0_IRQn);
 	NVIC_ClearPendingIRQ(TC0_IRQn);
@@ -259,84 +144,21 @@ int main (void)
  	NVIC_EnableIRQ(TC0_IRQn);
 	 
 	while(1) {
+		
 		gpio_set_pin_high(PIO_PB10_IDX);
 
-		
+		if(RX) {
+			if(samples_done){
+				fft_exe();
+				samples_done = 0;
+			}
+		}
+
 		if(pio_get(PIOB, PIO_INPUT | PIO_PERIPH_B, PIO_PB1)) {
 			toggle_motor(LRA_on_off);
 			toggle(PIO_PB10);
 		}
 		
-		 if(sampleCounter < 1) { //If no new sample, just print debug statement
-			sprintf(print_buf, "Sample_c: %d \r\n", sampleCounter);
-			//console_write(print_buf, sizeof(print_buf));
-		 }
-		 else{
-			 //Disable timer interrupt so that the FFT can complete before being interrupted
-			 NVIC_DisableIRQ(TC0_IRQn);
-			 
-			 //Perform the FFT transform
-			 arm_cfft_radix4_q31(&fft_inst_fix, samples_hold);
-			 
-			 // Calculate magnitude of complex numbers outq31put by the FFT.
- 			arm_cmplx_mag_q31(samples_hold, magnitudes_fix, FFT_SIZE);
-			
-			//Copies magnitudes over to new array for finding max; only copy first half becuase the 
-			//complex forier transform has even symmetry so only the first half of the data is relevent
-			for (int i = 0; i < FFT_SIZE/2; ++i) {
-			  max_finder[i] = magnitudes_fix[i];
-			}
-			
-			//Uncomment to display the DC mangitude component of the signal
-			//sprintf(print_buf, "magnitudes[0] \t %d \r\n", magnitudes_fix[0]);
-			//console_write(print_buf, sizeof(print_buf));
-			
-			//Set the DC component of the magnitudes to zero; it tends to be larger than the other
-			//frequency compenents, so it scews the max frequency finder
-			
-			/*for (int i = 0; i < (FILTER_LOW/BIN_SIZE); i++)
-			{
-				max_finder[i] = 0;
-			}
-			for (int i = FILTER_HIGH/BIN_SIZE; i < FFT_SIZE; i++){
-				max_finder[i] = 0;
-			}*/
-			max_finder[0] = 0;
-			
-			//Find the magnitude of the dominent frequency
-			//arm_max_q31(max_finder, FFT_SIZE, &max_val, &max_index);
-			
-			/*for(int i = 0; i < FFT_SIZE; i++) {
-				sprintf(buffer, "%d - %d: %d", (SAMPLE_RATE_HZ/FFT_SIZE)*i, (SAMPLE_RATE_HZ/FFT_SIZE)*i+(SAMPLE_RATE_HZ/FFT_SIZE), magnitudes_fix[i]);
-				console_write(buffer, sizeof(print_buf));
-			}*/
-	
-			//Calulate the upper and lower range of the dominent frequency 
-			dom_freq_l = BIN_SIZE*max_index;
-			dom_freq_h = dom_freq_l + BIN_SIZE;
-			
-			//Re-enable the Timer interrupt
-			NVIC_EnableIRQ(TC0_IRQn);
-			
-			/*for(int i = 0; i < FFT_SIZE; i++) {
-				sprintf(buffer, "%d - %d\t", (SAMPLE_RATE_HZ/FFT_SIZE)*i, (SAMPLE_RATE_HZ/FFT_SIZE)*i+(SAMPLE_RATE_HZ/FFT_SIZE));
-				console_write(buffer, sizeof(print_buf));
-				console_write("\r\n", 2);
-			}*/
-			for(int i = 0; i < FFT_SIZE/2; i++) {
-				sprintf(buffer, "%d, ", max_finder[i]);
-				console_write(buffer, sizeof(print_buf));
-			}
-			console_write(BREAKER, sizeof(BREAKER));
-			
-			//Print the dominent frequency range
-			//sprintf(print_buf, "%d - %d  @ %d Val: %d \r\n", dom_freq_l, dom_freq_h, max_index, max_val);
-			//console_write(print_buf, sizeof(print_buf));
-			
-			//Uncomment to output accelerometer data
-			//sprintf(buffer, "Z_HIGH: %x\tZ_LOW: %x\tZ_VAL: %d \r\n", rx_data[0], rx_data[1], total);
-			//console_write(buffer, sizeof(buffer));
-		}//End if has sampled
 	}//End while
 }//End main
 
@@ -411,7 +233,7 @@ void tc_config(uint32_t freq_desired, Tc* TCn, uint32_t CHANNEL, uint32_t PER_ID
 	// Configure PMC				
 	pmc_enable_periph_clk(PER_ID);
 
-	// Configure TC for a 4Hz frequency and trigger on RC compare.
+	// Configure TC for a frequency and trigger on RC compare.
 	tc_find_mck_divisor(
 		(uint32_t)freq_desired,	// The desired frequency as a uint32. 
 		ul_sysclk,				// Master clock freq in Hz.
@@ -514,16 +336,200 @@ void pwm_init_start(void) {
 
 void on_off_key(void){
 	uint32_t ul_duty;
-	if(TOGGLE_M){
+	if(message[message_counter]){
 		ul_duty = 20;
-		TOGGLE_M = 0;
+		message_counter++;
 	}
 	else{
 		ul_duty = 50;
-		TOGGLE_M = 1;
+		message_counter++;
 	}//End else
+	
+	if(message_counter > MESSAGE_LEN) {
+		message_counter = 0;
+		message_to_send = 0;
+		pio_clear(PIOA, PIO_PA31);//LRA
+	}
 	
 	g_pwm_channel_led.channel = PWM_CHANNEL_0;
 	pwm_channel_update_duty(PWM, &g_pwm_channel_led, ul_duty);
 	
 }
+
+// void on_off_key(void){
+// 	uint32_t ul_duty;
+// 	if(TOGGLE_M){
+// 		ul_duty = 20;
+// 		TOGGLE_M = 0;
+// 	}
+// 	else{
+// 		ul_duty = 50;
+// 		TOGGLE_M = 1;
+// 	}//End else
+// 	
+// 	g_pwm_channel_led.channel = PWM_CHANNEL_0;
+// 	pwm_channel_update_duty(PWM, &g_pwm_channel_led, ul_duty);
+// 	
+//}
+
+void fft_exe(void){
+	NVIC_DisableIRQ(TC0_IRQn);
+	pio_clear(PIOA, PIO_PA31);//LRA
+	console_write("START PROCESSING...\r\n", 23);
+		
+	for(int i =BOTTOM_BIN; i < TOP_BIN+1; i++) {
+		char printer[20];
+		sprintf(printer, "%d ,", i *BIN_SIZE);
+		console_write(printer, sizeof(printer));
+	}
+		//console_write(BREAKER, sizeof(BREAKER));
+		console_write("\r\n", 2);
+	
+	for(int i = 0; i < GOAL_SAMPLES-FFT_SIZE; i++) {
+		
+		//Disable timer interrupt so that the FFT can complete before being interrupted
+		
+		//console_write(BREAKER, sizeof(BREAKER));
+		//sprintf(buffer, "EXECTUING FFT %d \r\n", i);
+		//console_write(buffer, sizeof(buffer));
+		//delay_ms(1000);
+		
+		  for(int it = 0; it < FFT_SIZE*2; it++) {
+			samples_hold[it] = holder[i+it];
+			//sprintf(buffer, "samples_hold[%d] = %d \r\n ", FFT_SIZE*i+it, samples_hold[it]);
+			//console_write(buffer, sizeof(buffer));
+		 }
+// 		
+// 		for(int j = 0; j++; j < FFT_SIZE*2) {
+// 			samples_hold[j] = holder[FFT_SIZE*i+j];
+// 			sprintf(buffer, "samples_hold[%d] = %d \r\n ", FFT_SIZE*i+j, samples_hold[j]);
+// 			console_write(buffer, sizeof(buffer));
+// 		}
+		
+		//Perform the FFT transform
+		arm_cfft_radix4_q31(&fft_inst_fix, samples_hold);
+			 
+		// Calculate magnitude of complex numbers outq31put by the FFT.
+ 		arm_cmplx_mag_q31(samples_hold, magnitudes_fix, FFT_SIZE);
+			
+		//Copies magnitudes over to new array for finding max; only copy first half becuase the 
+		//complex forier transform has even symmetry so only the first half of the data is relevent
+		for (int i = 0; i < FFT_SIZE/2; ++i) {
+			max_finder[i] = magnitudes_fix[i];
+		}
+		max_finder[0] = 0;
+				
+		//Uncomment to display the DC mangitude component of the signal
+		//sprintf(print_buf, "magnitudes[0] \t %d \r\n", magnitudes_fix[0]);
+		//console_write(print_buf, sizeof(print_buf));
+			
+		//Set the DC component of the magnitudes to zero; it tends to be larger than the other
+		//frequency compenents, so it scews the max frequency finder
+			
+		for (int i = 0; i < (FILTER_LOW/BIN_SIZE); i++)
+		{
+			max_finder[i] = 0;
+		}
+		for (int i = FILTER_HIGH/BIN_SIZE; i < FFT_SIZE; i++){
+			max_finder[i] = 0;
+		}
+
+			
+		//Find the magnitude of the dominent frequency
+		arm_max_q31(max_finder, FFT_SIZE, &max_val, &max_index);
+			
+		/*for(int i = 0; i < FFT_SIZE; i++) {
+			sprintf(buffer, "%d - %d: %d", (SAMPLE_RATE_HZ/FFT_SIZE)*i, (SAMPLE_RATE_HZ/FFT_SIZE)*i+(SAMPLE_RATE_HZ/FFT_SIZE), magnitudes_fix[i]);
+			console_write(buffer, sizeof(print_buf));
+		}*/
+	
+		//Calulate the upper and lower range of the dominent frequency 
+		dom_freq_l = BIN_SIZE*max_index;
+		dom_freq_h = dom_freq_l + BIN_SIZE;
+			
+			
+		/*for(int i = 0; i < FFT_SIZE; i++) {
+			sprintf(buffer, "%d - %d\t", (SAMPLE_RATE_HZ/FFT_SIZE)*i, (SAMPLE_RATE_HZ/FFT_SIZE)*i+(SAMPLE_RATE_HZ/FFT_SIZE));
+			console_write(buffer, sizeof(print_buf));
+			console_write("\r\n", 2);
+		}*/
+// 		for(int i = 0; i < FFT_SIZE/2; i++) {
+// 			sprintf(buffer, "magnitudes_fix[%d] = %d \r\n ", i, magnitudes_fix[i]);
+// 			console_write(buffer, sizeof(buffer));
+// 		}
+		
+		for(int i = BOTTOM_BIN; i < TOP_BIN+1; i++) {
+			char printer[20];
+			//sprintf(printer, "%x              ", max_finder[i]);
+			//sprintf(printer, "%d, ", max_finder[i]);
+			//console_write(printer, sizeof(printer));
+		}
+		
+		RESONANT_BIN[i] = max_finder[BOTTOM_BIN];
+		//console_write(BREAKER, sizeof(BREAKER));
+		console_write("\r\n", 2);
+		//delay_ms(1000);
+		
+		//Print the dominent frequency range
+		//sprintf(print_buf, "%d - %d  @ %d Val: %d \r\n", dom_freq_l, dom_freq_h, max_index, max_val);
+		//console_write(print_buf, sizeof(print_buf));
+			
+		//Uncomment to output accelerometer data
+		//sprintf(buffer, "Z_HIGH: %x\tZ_LOW: %x\tZ_VAL: %d \r\n", rx_data[0], rx_data[1], total);
+		//console_write(buffer, sizeof(buffer));
+		}//End for i < FFT_NO
+		
+		moving_average();
+		console_write("\r\n", 2);
+		console_write("\r\n", 2);
+		
+		for(int i = 0; i< MESSAGE_LEN; i++) {
+			sprintf(buffer, "%d, ", i);
+			console_write(buffer, 2);
+		}
+		console_write("\r\n", 2);
+		for(int i = 0; i< MESSAGE_LEN; i++) {
+			sprintf(buffer, "%d, ", message_trans[i]);
+			console_write(buffer, 2);
+		}
+		console_write("\r\n", 2);
+		
+		for(int i = 0; i< MESSAGE_LEN; i++) {
+			sprintf(buffer, "%d, ", message[i]);
+			console_write(buffer, 2);
+		}
+		console_write("\r\n", 2);
+		pio_set(PIOA, PIO_PA31);//LRA
+		delay_ms(1000);
+		pio_clear(PIOA, PIO_PA31);//LRA
+		
+		return;
+}
+
+void moving_average(void){
+	
+	int sum;
+	for(int i = 0; i < MESSAGE_LEN; i++){
+		sum = 0;
+		for(int j = 0; j < BAUD_LEN_SAMPLES; j++){
+			sum+= (RESONANT_BIN[BAUD_LEN_SAMPLES*i+j]>>4);
+		}	
+		sum = sum/BAUD_LEN_SAMPLES; 
+		summer[i] = sum;
+		sprintf(buffer, "sum[%d] = %d \r\n ", i, sum);
+		console_write(buffer, sizeof(buffer));
+		if (sum > 2500000)
+		{
+			message_trans[i] = 1;
+			if((summer[i-1] - sum) > 2000000){
+					message_trans[i] = 0;
+			}
+		}
+		else {
+			message_trans[i] = 0;
+			if((sum -summer[i-1]) > 2000000) {
+				message_trans[i] = 1;
+			}
+		}
+	}//End for MESSAGE_LEN
+}//End moving average
