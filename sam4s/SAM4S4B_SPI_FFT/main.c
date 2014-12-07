@@ -41,44 +41,6 @@ void TC0_Handler(void)
 	}//End get status
 }//End handler
 
-//  void PWM_Handler(void)
-//  {
-// 	static uint32_t ul_count = 0;  /* PWM counter value */
-// 	static uint32_t ul_duty = INIT_DUTY_VALUE;  /* PWM duty cycle rate */
-// 	static uint8_t fade_in = 1;  /* LED fade in flag */
-// 	uint32_t events = pwm_channel_get_interrupt_status(PWM);
-// 
-// 	/* Interrupt on PIN_PWM_LED0_CHANNEL */
-// 	if ((events & (1 << PWM_CHANNEL_0)) == (1 << PWM_CHANNEL_0)) {
-// 		ul_count++;
-// 
-// 		/* Fade in/out */
-// 		if (ul_count == (PWM_FREQUENCY / (PERIOD_VALUE - INIT_DUTY_VALUE))) {
-// 			/* Fade in */
-// 			if (fade_in) {
-// 				ul_duty++;
-// 				if (ul_duty == PERIOD_VALUE) {
-// 					fade_in = 0;
-// 				}
-// 			} else {
-// 				/* Fade out */
-// 				ul_duty--;
-// 				if (ul_duty == INIT_DUTY_VALUE) {
-// 					fade_in = 1;
-// 				}
-// 			}
-// 
-// 			/* Set new duty cycle */
-// 			ul_count = 0;
-// 			g_pwm_channel_led.channel = PWM_CHANNEL_0;
-// 			pwm_channel_update_duty(PWM, &g_pwm_channel_led, ul_duty);
-// 			g_pwm_channel_led.channel = PWM_CHANNEL_0;
-// 			pwm_channel_update_duty(PWM, &g_pwm_channel_led, ul_duty);
-// 		}
-// 	}
-//  }
-
-
 int main (void)
 {
 	system_clock_begin();
@@ -357,154 +319,59 @@ void on_off_key(void){
 	
 }
 
-// void on_off_key(void){
-// 	uint32_t ul_duty;
-// 	if(TOGGLE_M){
-// 		ul_duty = 20;
-// 		TOGGLE_M = 0;
-// 	}
-// 	else{
-// 		ul_duty = 50;
-// 		TOGGLE_M = 1;
-// 	}//End else
-// 	
-// 	g_pwm_channel_led.channel = PWM_CHANNEL_0;
-// 	pwm_channel_update_duty(PWM, &g_pwm_channel_led, ul_duty);
-// 	
-//}
-
 void fft_exe(void){
+	//Disable timer interrupt so that the FFT can complete before being interrupted
 	NVIC_DisableIRQ(TC0_IRQn);
 	pio_clear(PIOA, PIO_PA31);//LRA
-	console_write("START PROCESSING...\r\n", 23);
 		
-	for(int i =BOTTOM_BIN; i < TOP_BIN+1; i++) {
-		char printer[20];
-		sprintf(printer, "%d ,", i *BIN_SIZE);
-		console_write(printer, sizeof(printer));
-	}
-		//console_write(BREAKER, sizeof(BREAKER));
-		console_write("\r\n", 2);
-	
 	for(int i = 0; i < GOAL_SAMPLES-FFT_SIZE; i++) {
-		
-		//Disable timer interrupt so that the FFT can complete before being interrupted
-		
-		//console_write(BREAKER, sizeof(BREAKER));
-		//sprintf(buffer, "EXECTUING FFT %d \r\n", i);
-		//console_write(buffer, sizeof(buffer));
-		//delay_ms(1000);
 		
 		  for(int it = 0; it < FFT_SIZE*2; it++) {
 			samples_hold[it] = holder[i+it];
-			//sprintf(buffer, "samples_hold[%d] = %d \r\n ", FFT_SIZE*i+it, samples_hold[it]);
-			//console_write(buffer, sizeof(buffer));
 		 }
-// 		
-// 		for(int j = 0; j++; j < FFT_SIZE*2) {
-// 			samples_hold[j] = holder[FFT_SIZE*i+j];
-// 			sprintf(buffer, "samples_hold[%d] = %d \r\n ", FFT_SIZE*i+j, samples_hold[j]);
-// 			console_write(buffer, sizeof(buffer));
-// 		}
 		
 		//Perform the FFT transform
 		arm_cfft_radix4_q31(&fft_inst_fix, samples_hold);
+// 		len = sprintf(buffer, "SAM: %d \t %d \r\n", samples_hold[12], samples_hold[13]);
+// 		console_write(buffer, len);
 			 
 		// Calculate magnitude of complex numbers outq31put by the FFT.
- 		arm_cmplx_mag_q31(samples_hold, magnitudes_fix, FFT_SIZE);
-			
-		//Copies magnitudes over to new array for finding max; only copy first half becuase the 
-		//complex forier transform has even symmetry so only the first half of the data is relevent
-		for (int i = 0; i < FFT_SIZE/2; ++i) {
-			max_finder[i] = magnitudes_fix[i];
-		}
-		max_finder[0] = 0;
-				
-		//Uncomment to display the DC mangitude component of the signal
-		//sprintf(print_buf, "magnitudes[0] \t %d \r\n", magnitudes_fix[0]);
-		//console_write(print_buf, sizeof(print_buf));
-			
-		//Set the DC component of the magnitudes to zero; it tends to be larger than the other
-		//frequency compenents, so it scews the max frequency finder
-			
-		for (int i = 0; i < (FILTER_LOW/BIN_SIZE); i++)
-		{
-			max_finder[i] = 0;
-		}
-		for (int i = FILTER_HIGH/BIN_SIZE; i < FFT_SIZE; i++){
-			max_finder[i] = 0;
-		}
-
-			
-		//Find the magnitude of the dominent frequency
-		arm_max_q31(max_finder, FFT_SIZE, &max_val, &max_index);
-			
-		/*for(int i = 0; i < FFT_SIZE; i++) {
-			sprintf(buffer, "%d - %d: %d", (SAMPLE_RATE_HZ/FFT_SIZE)*i, (SAMPLE_RATE_HZ/FFT_SIZE)*i+(SAMPLE_RATE_HZ/FFT_SIZE), magnitudes_fix[i]);
-			console_write(buffer, sizeof(print_buf));
-		}*/
-	
-		//Calulate the upper and lower range of the dominent frequency 
-		dom_freq_l = BIN_SIZE*max_index;
-		dom_freq_h = dom_freq_l + BIN_SIZE;
-			
-			
-		/*for(int i = 0; i < FFT_SIZE; i++) {
-			sprintf(buffer, "%d - %d\t", (SAMPLE_RATE_HZ/FFT_SIZE)*i, (SAMPLE_RATE_HZ/FFT_SIZE)*i+(SAMPLE_RATE_HZ/FFT_SIZE));
-			console_write(buffer, sizeof(print_buf));
-			console_write("\r\n", 2);
-		}*/
-// 		for(int i = 0; i < FFT_SIZE/2; i++) {
-// 			sprintf(buffer, "magnitudes_fix[%d] = %d \r\n ", i, magnitudes_fix[i]);
-// 			console_write(buffer, sizeof(buffer));
-// 		}
+ 		arm_cmplx_mag_q31(&samples_hold[2*BOTTOM_BIN], magnitudes_fix, 1);
+// 		len = sprintf(buffer, "MAG: %d \r\n", *magnitudes_fix);
+// 		console_write(buffer, len);
 		
-		for(int i = BOTTOM_BIN; i < TOP_BIN+1; i++) {
-			char printer[20];
-			//sprintf(printer, "%x              ", max_finder[i]);
-			//sprintf(printer, "%d, ", max_finder[i]);
-			//console_write(printer, sizeof(printer));
-		}
-		
-		RESONANT_BIN[i] = max_finder[BOTTOM_BIN];
-		//console_write(BREAKER, sizeof(BREAKER));
-		console_write("\r\n", 2);
-		//delay_ms(1000);
-		
-		//Print the dominent frequency range
-		//sprintf(print_buf, "%d - %d  @ %d Val: %d \r\n", dom_freq_l, dom_freq_h, max_index, max_val);
-		//console_write(print_buf, sizeof(print_buf));
+		RESONANT_BIN[i] = *magnitudes_fix;
 			
 		//Uncomment to output accelerometer data
 		//sprintf(buffer, "Z_HIGH: %x\tZ_LOW: %x\tZ_VAL: %d \r\n", rx_data[0], rx_data[1], total);
 		//console_write(buffer, sizeof(buffer));
-		}//End for i < FFT_NO
+	}//End for i < GOAL_SAMPLES-FFT_SIZE
 		
-		moving_average();
-		console_write("\r\n", 2);
-		console_write("\r\n", 2);
+	moving_average();
+	console_write("\r\n", 2);
+	console_write("\r\n", 2);
 		
-		for(int i = 0; i< MESSAGE_LEN; i++) {
-			sprintf(buffer, "%d, ", i);
-			console_write(buffer, 2);
-		}
-		console_write("\r\n", 2);
-		for(int i = 0; i< MESSAGE_LEN; i++) {
-			sprintf(buffer, "%d, ", message_trans[i]);
-			console_write(buffer, 2);
-		}
-		console_write("\r\n", 2);
+	for(int i = 0; i< MESSAGE_LEN; i++) {
+		sprintf(buffer, "%d, ", i);
+		console_write(buffer, 2);
+	}
+	console_write("\r\n", 2);
+	for(int i = 0; i< MESSAGE_LEN; i++) {
+		sprintf(buffer, "%d, ", message_trans[i]);
+		console_write(buffer, 2);
+	}
+	console_write("\r\n", 2);
 		
-		for(int i = 0; i< MESSAGE_LEN; i++) {
-			sprintf(buffer, "%d, ", message[i]);
-			console_write(buffer, 2);
-		}
-		console_write("\r\n", 2);
-		pio_set(PIOA, PIO_PA31);//LRA
-		delay_ms(1000);
-		pio_clear(PIOA, PIO_PA31);//LRA
+	for(int i = 0; i< MESSAGE_LEN; i++) {
+		sprintf(buffer, "%d, ", message[i]);
+		console_write(buffer, 2);
+	}
+	console_write("\r\n", 2);
+	pio_set(PIOA, PIO_PA31);//LRA
+	delay_ms(1000);
+	pio_clear(PIOA, PIO_PA31);//LRA
 		
-		return;
+	return;
 }
 
 void moving_average(void){
@@ -533,6 +400,7 @@ void moving_average(void){
 			}
 		}
 	}//End for MESSAGE_LEN
+	message_trans[0] = 1;
 }//End moving average
 
 void system_clock_begin(void){
