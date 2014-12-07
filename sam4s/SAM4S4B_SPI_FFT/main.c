@@ -81,7 +81,7 @@ void TC0_Handler(void)
 
 int main (void)
 {
-	sysclk_init();
+	system_clock_begin();
 	board_init();
 	
 	// set the pins to use the uart peripheral
@@ -96,7 +96,7 @@ int main (void)
 	pmc_enable_periph_clk(PIOB); 
 
 	const sam_uart_opt_t uart1_settings =
-	{ sysclk_get_cpu_hz(), UART_SERIAL_BAUDRATE, UART_SERIAL_MODE };
+	{ 120000000, UART_SERIAL_BAUDRATE, UART_SERIAL_MODE };
 
 	uart_init(UART0,&uart1_settings);      //Init UART1 and enable Rx and Tx
 	 
@@ -227,7 +227,8 @@ void tc_config(uint32_t freq_desired, Tc* TCn, uint32_t CHANNEL, uint32_t PER_ID
 	
 	uint32_t ul_div;
 	uint32_t ul_tcclks;
-	uint32_t ul_sysclk = sysclk_get_cpu_hz();
+	//uint32_t ul_sysclk = sysclk_get_cpu_hz();
+	uint32_t ul_sysclk = 120000000;
 	uint32_t counts;	
 	
 	// Configure PMC				
@@ -303,7 +304,7 @@ void pwm_init_start(void) {
 	pwm_clock_t clock_setting = {
 	.ul_clka = PWM_FREQUENCY * PERIOD_VALUE,
 	.ul_clkb = 0,
-	.ul_mck = sysclk_get_cpu_hz()
+	.ul_mck = 120000000//sysclk_get_cpu_hz()
 	};
 	pwm_init(PWM, &clock_setting);
 	
@@ -512,7 +513,7 @@ void moving_average(void){
 	for(int i = 0; i < MESSAGE_LEN; i++){
 		sum = 0;
 		for(int j = 0; j < BAUD_LEN_SAMPLES; j++){
-			sum+= (RESONANT_BIN[BAUD_LEN_SAMPLES*i+j]>>4);
+			sum+= (RESONANT_BIN[+BAUD_LEN_SAMPLES*i+j]>>4);
 		}	
 		sum = sum/BAUD_LEN_SAMPLES; 
 		summer[i] = sum;
@@ -533,3 +534,62 @@ void moving_average(void){
 		}
 	}//End for MESSAGE_LEN
 }//End moving average
+
+void system_clock_begin(void){
+	//Disable watch dog
+	WDT->WDT_MR |= WDT_MR_WDDIS;
+	
+	//initialize flash to be 5 wait states
+	EFC0->EEFC_FMR = EEFC_FMR_FWS(5) | EEFC_FMR_CLOE;
+	
+	//enable cache and configure to count instruction hits
+	//CMCC->CMCC_CTRL |= 1;
+	//CMCC->CMCC_MCFG = 0;
+	//CMCC->CMCC_MEN |= 1;
+	
+	//sysclk_init();
+	//disable write protection of PMC registers
+	PMC->PMC_WPMR = (0x504d43 << 8) | 1;
+	PMC->PMC_WPMR = (0x504d43 << 8) | 0;
+	PMC->PMC_WPMR &= (0x504d43 << 8);
+	
+	//use the 12 mhz rc oscillator
+	//switch over to the slow RC clock
+	//PMC->PMC_MCKR &= ~0x03;
+	//while(!(PMC->PMC_SR & PMC_SR_MCKRDY));
+	
+	//enable the fast crystal oscillator and wait for it to stabiliz
+	//PMC->CKGR_MOR = ((0x37 << 16) | (0x40 << 8) | 1);
+	//while(!(PMC->PMC_SR & (1 << 0)));
+	
+	//change the rc oscillator to 12 mhz
+	//PMC->CKGR_MOR = (PMC->CKGR_MOR & ~(0x07 << 4)) | (0x02 << 4) | (0x40 << 8) | (0x37 << 16);
+	//while(!(PMC->PMC_SR & (1 << 17)));
+	
+	//select the crystal oscillator as the main clock source
+	//PMC->CKGR_MOR |= ((0x37 << 16) | (1 << 24));
+	//while(!(PMC->PMC_SR & (1 << 16)));
+	
+	//calc the main clock frequency
+	PMC->CKGR_MCFR |= (1 << 20);
+	volatile uint32_t xtal_meas;
+	do 
+	{
+		xtal_meas = PMC->CKGR_MCFR & (0xffff);
+	}while(!(PMC->CKGR_MCFR & (1 << 16)));
+	
+	
+	while(!(PMC->PMC_SR & PMC_SR_MOSCRCS));
+	
+	//enable the plla
+	PMC->PMC_MCKR |= PMC_MCKR_PLLADIV2;
+	PMC->CKGR_PLLAR = (1 << 29) | (60 << 16) | (0x3f << 8) | 1;
+	while(!(PMC->PMC_SR & PMC_SR_LOCKA));
+	volatile int bar;
+	
+	//switch to plla
+	PMC->PMC_MCKR = (PMC->PMC_MCKR & ~(0x07 << 4)) | (0x00 << 4);
+	while(!(PMC->PMC_SR & PMC_SR_MCKRDY));
+	PMC->PMC_MCKR = (PMC->PMC_MCKR & ~(0x03)) | 0x02;
+	while(!(PMC->PMC_SR & PMC_SR_MCKRDY));
+}
