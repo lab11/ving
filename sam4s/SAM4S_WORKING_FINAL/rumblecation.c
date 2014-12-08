@@ -35,8 +35,8 @@ uint8_t rumbleSend(uint8_t sendByte) {
 
 void receiveCallback(uint16_t rxByte) {
 	uint8_t par = calculateOddParity(rxByte & 0xFF);
-	if(par == (rxByte & 0x0100)) {
-		rumbleAck();
+	if(par == !!(rxByte & 0x0100)) {
+		//rumbleAck();
 		callBackByte(rxByte & 0xFF);
 	}
 }

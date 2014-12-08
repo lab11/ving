@@ -52,12 +52,17 @@ int main (void)
 			uart_write(UART0, transmitBuf[transmitBufRead]);
 			transmitBufRead++;
 		}*/
-// 		if(uart_is_rx_ready(UART0)) {
-// 			uint8_t in;
-// 			uart_read(UART0, &in);
-// 			uart_write(UART0, in);
-// 			rumbleSend(in);
-// 		}
+		
+		if(uart_is_rx_ready(UART0)) {
+			uint8_t in;
+			uart_read(UART0, &in);
+			uart_write(UART0, in);
+			rumbleStop();
+			rumbleSend(in);
+			delay_ms(600);
+			rumbleListen(callback);
+		}
+		
 	}
 
 }
@@ -66,7 +71,8 @@ int main (void)
 
 
 void callback(uint8_t character){
-	uart_write(UART0, character);
+	indexer = sprintf(buffer, "%c", character);
+	console_write(buffer, indexer);
 }
 
 void initLeds(void) {

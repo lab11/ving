@@ -231,6 +231,12 @@ void rumbleAck(void) {
 
 void rumbleStop(void){
 	NVIC_DisableIRQ(TC0_IRQn);
+	pio_clear(PIOA, PIO_PA31);//LRA
+	HIGH_COUNTER = 0;
+	transmitting = 0;
+	message_to_send = 1;
+	message_counter = 0;
+	clear_Rx();
 	//disable interrupt
 }
 
@@ -250,14 +256,7 @@ void TC0_Handler(void){
 	else {
 		if(tc_get_status(TC0,CHANNEL0)){
 			if(RX){
-				if(message_done){
-					NVIC_DisableIRQ(TC0_IRQn);
-					clear_Rx();
-					byte_return(message_trans);
-					NVIC_EnableIRQ(TC0_IRQn);
-					//return state
-				}
-			
+				
 				readRegister(Z_HIGH, &rx_data, 2);
 				val = (q31_t)((rx_data[0]<<8)+rx_data[1]); //high << 8 + low
 				val = (val << 30-READ_RES);
@@ -272,6 +271,16 @@ void TC0_Handler(void){
 				if (full>FFT_SIZE*2){
 					fft_exe();
 				}
+				
+				if(message_done){
+					NVIC_DisableIRQ(TC0_IRQn);
+					byte_return(message_trans);
+					clear_Rx();
+					NVIC_EnableIRQ(TC0_IRQn);
+					//return state
+				}
+			
+
 			}
 			if(TX){
 				HIGH_COUNTER++;
@@ -604,44 +613,44 @@ void fft_exe(void){
 			
 		if(message_done) {
 			
-			for(int i = 0; i < 1000; i++){
+			/*for(int i = 0; i < 1000; i++){
 				len = sprintf(buffer, "%d \r\n ", holder[i]);
 				console_write(buffer, len);
-			}
+			}*/
 		
-			len = sprintf(buffer, "HIGH_LEVEL: %d \r\n", started_mean);
-			console_write(buffer, len);
-		
-			len = sprintf(buffer, "LOW_LEVEL: %d \r\n", BIT_LOW_LEVEL);
-			console_write(buffer, len);
-			
-			
-			len = sprintf(buffer, "VARY: %d \r\n", BIT_VARY);
-			console_write(buffer, len);
-			
-			
-			for(int i = 0; i< 9; i++) {
-				sprintf(buffer, "%d, ", i);
-				console_write(buffer, 2);
-			}
-			console_write("\r\n", 2);
-			for(int i = 0; i< 9; i++) {
-				sprintf(buffer, "%d, ", (message_trans >> i)&1);
-				console_write(buffer, 2);
-			}
-			console_write("\r\n", 2);
-			len = sprintf(buffer, "CHAR: %c \r\n", message_trans);
-			console_write(buffer, len); 
-			console_write("\r\n", 2);
-		
-			for(int i = 0; i <9; i++){
-				len = sprintf(buffer, "sum[%d]: %d \r\n", i, summer[i]);
-				console_write(buffer, len);			}
-			//for(int i = 0; i< MESSAGE_LEN; i++) {
-			//	sprintf(buffer, "%d, ", message & (1<<i));
-			//	console_write(buffer, 2);
-			//}
-			console_write("\r\n", 2);
+// 			len = sprintf(buffer, "HIGH_LEVEL: %d \r\n", started_mean);
+// 			console_write(buffer, len);
+// 		
+// 			len = sprintf(buffer, "LOW_LEVEL: %d \r\n", BIT_LOW_LEVEL);
+// 			console_write(buffer, len);
+// 			
+// 			
+// 			len = sprintf(buffer, "VARY: %d \r\n", BIT_VARY);
+// 			console_write(buffer, len);
+// 			
+// 			
+// 			for(int i = 0; i< 9; i++) {
+// 				sprintf(buffer, "%d, ", i);
+// 				console_write(buffer, 2);
+// 			}
+// 			console_write("\r\n", 2);
+// 			for(int i = 0; i< 9; i++) {
+// 				sprintf(buffer, "%d, ", (message_trans >> i)&1);
+// 				console_write(buffer, 2);
+// 			}
+// 			console_write("\r\n", 2);
+// 			len = sprintf(buffer, "CHAR: %c \r\n", message_trans);
+// 			console_write(buffer, len); 
+// 			console_write("\r\n", 2);
+// 		
+// 			for(int i = 0; i <9; i++){
+// 				len = sprintf(buffer, "sum[%d]: %d \r\n", i, summer[i]);
+// 				console_write(buffer, len);			}
+// 			//for(int i = 0; i< MESSAGE_LEN; i++) {
+// 			//	sprintf(buffer, "%d, ", message & (1<<i));
+// 			//	console_write(buffer, 2);
+// 			//}
+// 			console_write("\r\n", 2);
 			//pio_set(PIOA, PIO_PA31);//LRA
 			//delay_ms(1000);
 			//pio_clear(PIOA, PIO_PA31);//LRA
@@ -651,16 +660,6 @@ void fft_exe(void){
 			NVIC_DisableIRQ(TC0_IRQn);
 			return;
 		}
-		
-		if(global_counter >= 1000){
-			for(int i = 0; i < 400; i++){
-				len = sprintf(buffer, "%d \r\n ", holder[i]);
-				console_write(buffer, len);
-			}
-			NVIC_DisableIRQ(TC0_IRQn);
-			return;
-		}//End if global counter
-		
 		
 		NVIC_EnableIRQ(TC0_IRQn);
 		
