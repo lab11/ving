@@ -16,25 +16,39 @@ void TC0_Handler(void)
 {
 	if(tc_get_status(TC0,CHANNEL0)){
 		if(RX){
-			if (TOTAL_COUNTER > GOAL_SAMPLES){
-				samples_done = 1;
+			if(message_done){
+				NVIC_DisableIRQ(TC0_IRQn);
+				//Josh callback
 			}
+			
 			readRegister(Z_HIGH, &rx_data, 2);
 			val = (q31_t)((rx_data[0]<<8)+rx_data[1]); //high << 8 + low
 			val = (val << 30-READ_RES);
 			
-			holder[TOTAL_COUNTER] = val;
-			holder[TOTAL_COUNTER+1] = (q31_t)0;
+			shiftLeft();
+			samples_fix[FFT_SIZE*2-2] = val;
+			samples_fix[FFT_SIZE*2-1] = (q31_t)0;
+			copyArray();
 			
-			toggle(PIO_PB11);
-			TOTAL_COUNTER+=2;
+			fft_exe();
+			
+			wait_counter++;
+			
 		}
 		if(TX){
 			HIGH_COUNTER++;
 			if(HIGH_COUNTER > HIGH_DIV) {
 				HIGH_COUNTER = 0;
-				pio_set(PIOB, PIO_PB12);				if(message_to_send)
+				pio_set(PIOB, PIO_PB12);				if(message_to_send){
 					on_off_key();
+				}
+				else{
+					pio_clear(PIOA, PIO_PA31);//LRA
+					//delay_ms(1000);
+					//pio_set(PIOA, PIO_PA31);//LRA
+					//message_to_send = 1;
+					//message_counter = 0;
+				}
 			}//End if HIGH_COUNTER
 		}
 		NVIC_ClearPendingIRQ(TC0_IRQn);
@@ -43,7 +57,8 @@ void TC0_Handler(void)
 
 int main (void)
 {
-	system_clock_begin();
+	//system_clock_begin();
+	sysclk_init();
 	board_init();
 	
 	// set the pins to use the uart peripheral
@@ -96,9 +111,17 @@ int main (void)
 	tc_config(SAMPLE_RATE_HZ, TC0, CHANNEL0, ID_TC0);
 	//tc_config(PULSE_RATE_HZ, TC0, CHANNEL1, ID_TC0);
 	
-	on_off_key();
-	delay_ms(100);
+	if(TX) {
+		pio_clear(PIOA, PIO_PA31);//LRA
+		delay_ms(1000);
+		pio_set(PIOA, PIO_PA31);//LRA
+	}
+	//delay_ms(100);
 
+	if(RX) {
+		pio_clear(PIOA, PIO_PA31);//LRA
+		//delay_ms(1000);
+	}
 	
 	NVIC_DisableIRQ(TC0_IRQn);
 	NVIC_ClearPendingIRQ(TC0_IRQn);
@@ -109,17 +132,8 @@ int main (void)
 		
 		gpio_set_pin_high(PIO_PB10_IDX);
 
-		if(RX) {
-			if(samples_done){
-				fft_exe();
-				samples_done = 0;
-			}
-		}
+		
 
-		if(pio_get(PIOB, PIO_INPUT | PIO_PERIPH_B, PIO_PB1)) {
-			toggle_motor(LRA_on_off);
-			toggle(PIO_PB10);
-		}
 		
 	}//End while
 }//End main
@@ -301,7 +315,7 @@ void on_off_key(void){
 	uint32_t ul_duty;
 	if(message[message_counter]){
 		ul_duty = 20;
-		message_counter++;
+		message_counter++; 
 	}
 	else{
 		ul_duty = 50;
@@ -309,9 +323,9 @@ void on_off_key(void){
 	}//End else
 	
 	if(message_counter > MESSAGE_LEN) {
-		message_counter = 0;
+		//message_counter = 0;
 		message_to_send = 0;
-		pio_clear(PIOA, PIO_PA31);//LRA
+		//pio_clear(PIOA, PIO_PA31);//LRA
 	}
 	
 	g_pwm_channel_led.channel = PWM_CHANNEL_0;
@@ -322,85 +336,191 @@ void on_off_key(void){
 void fft_exe(void){
 	//Disable timer interrupt so that the FFT can complete before being interrupted
 	NVIC_DisableIRQ(TC0_IRQn);
-	pio_clear(PIOA, PIO_PA31);//LRA
 		
-	for(int i = 0; i < GOAL_SAMPLES-FFT_SIZE; i++) {
-		
-		  for(int it = 0; it < FFT_SIZE*2; it++) {
-			samples_hold[it] = holder[i+it];
-		 }
-		
-		//Perform the FFT transform
-		arm_cfft_radix4_q31(&fft_inst_fix, samples_hold);
-// 		len = sprintf(buffer, "SAM: %d \t %d \r\n", samples_hold[12], samples_hold[13]);
-// 		console_write(buffer, len);
+	//Perform the FFT transform
+	arm_cfft_radix4_q31(&fft_inst_fix, samples_hold);
+//  		len = sprintf(buffer, "SAM: %d \t %d \r\n", samples_hold[12], samples_hold[13]);
+//  		console_write(buffer, len);
 			 
-		// Calculate magnitude of complex numbers outq31put by the FFT.
- 		arm_cmplx_mag_q31(&samples_hold[2*BOTTOM_BIN], magnitudes_fix, 1);
-// 		len = sprintf(buffer, "MAG: %d \r\n", *magnitudes_fix);
-// 		console_write(buffer, len);
+	// Calculate magnitude of complex numbers outq31put by the FFT.
+ 	arm_cmplx_mag_q31(&samples_hold[2*BOTTOM_BIN], magnitudes_fix, 1);
+	holder[global_counter++] = *magnitudes_fix;
+	 
+//  	if(!start_edge_detected){
+// 		// len = sprintf(buffer, "%d \r\n", *magnitudes_fix);
+// 		//console_write(buffer, len);
+// 	 }
+	 
+	 
+// 		if(!zero_level_est) {
+// 			wait_buffer[wait_index++] = *magnitudes_fix;
+// 			arm_mean_q31(wait_buffer, sizeof(wait_buffer), &wait_mean);
+// 			if(wait_mean > THRESHOLD) {
+// 				 len = sprintf(buffer, "Waiting for zero \r\n", *magnitudes_fix);
+// 				//console_write(buffer, len);
+// 			}
+// 			else{
+// 				zero_buffer[zero_counter++] = *magnitudes_fix;
+// 				if(zero_counter > 10) {
+// 					arm_mean_q31(zero_buffer, sizeof(zero_buffer), &low_mean);
+// 					//BIT_LOW_LEVEL = low_mean;
+// 					BIT_LOW_LEVEL = 0;
+// 					len = sprintf(buffer, "LOW_LEVEL_EST: %d", BIT_LOW_LEVEL);
+// 					console_write(buffer, len);
+// 					zero_level_est = 1;
+// 				}//End if > 10
+// 			}
+// 		}//End if zero_level_est
+// 		
+// 		else {
+// 			if(!start_edge_detected){
+// 				start_edge_buffer[start_edge_head++] = *magnitudes_fix;
+// 				arm_mean_q31(start_edge_buffer, sizeof(start_edge_buffer), &high_mean);
+// 				if(high_mean > THRESHOLD) {
+// 					start_edge_detected = 1;
+// 					BIT_HIGH_LEVEL = high_mean;
+// 					BIT_VARY = BIT_HIGH_LEVEL - BIT_LOW_LEVEL;
+// 					len = sprintf(buffer, "HIGH_LEVEL_EST: %d \r\n", BIT_HIGH_LEVEL);
+// 					console_write(buffer, len);
+// 				}//End if mean > threshold
+// 				if(start_edge_head == start_edge_tail){
+// 					start_edge_head = 0;
+// 				}//End if starge_edge_head
+// 			}//End if start_edge_detected
+// 			
+// 			if(start_edge_detected){
+// 				ring_buffer[head++] = *magnitudes_fix;
+// 				if(head == tail){
+// 					head = 0;
+// 					moving_average();
+// 				}//End if head == tail
+// 			}//If start_edge_detected
+// 		}//End else
+
+		if(!start_edge_detected){
+			ring_buffer[head++] = *magnitudes_fix;
+			if(head == tail){
+				head = 0;
+				arm_mean_q31(ring_buffer, BAUD_LEN_SAMPLES, &started_mean);
+				if (started_mean > THRESHOLD){
+					start_edge_detected = 1;
+				}
+			}//End if head == tail
+		}//If start_edge_detected
 		
-		RESONANT_BIN[i] = *magnitudes_fix;
-			
+		if(start_edge_detected){
+				ring_buffer[head++] = *magnitudes_fix;
+				if(head == tail){
+					head = 0;
+					moving_average();
+				}//End if head == tail
+			}//If start_edge_detected
+		}//End else
+					
 		//Uncomment to output accelerometer data
 		//sprintf(buffer, "Z_HIGH: %x\tZ_LOW: %x\tZ_VAL: %d \r\n", rx_data[0], rx_data[1], total);
 		//console_write(buffer, sizeof(buffer));
-	}//End for i < GOAL_SAMPLES-FFT_SIZE
+			
+		if(message_done) {
 		
-	moving_average();
-	console_write("\r\n", 2);
-	console_write("\r\n", 2);
+			console_write("\r\n", 2);
+			console_write("\r\n", 2);
 		
-	for(int i = 0; i< MESSAGE_LEN; i++) {
-		sprintf(buffer, "%d, ", i);
-		console_write(buffer, 2);
-	}
-	console_write("\r\n", 2);
-	for(int i = 0; i< MESSAGE_LEN; i++) {
-		sprintf(buffer, "%d, ", message_trans[i]);
-		console_write(buffer, 2);
-	}
-	console_write("\r\n", 2);
+			len = sprintf(buffer, "HIGH_LEVEL: %d \r\n", high_mean);
+			console_write(buffer, len);
 		
-	for(int i = 0; i< MESSAGE_LEN; i++) {
-		sprintf(buffer, "%d, ", message[i]);
-		console_write(buffer, 2);
-	}
-	console_write("\r\n", 2);
-	pio_set(PIOA, PIO_PA31);//LRA
-	delay_ms(1000);
-	pio_clear(PIOA, PIO_PA31);//LRA
+			len = sprintf(buffer, "LOW_LEVEL: %d \r\n", BIT_LOW_LEVEL);
+			console_write(buffer, len);
+			
+			
+			len = sprintf(buffer, "VARY: %d \r\n", BIT_VARY);
+			console_write(buffer, len);
+			
+			
+			for(int i = 0; i< MESSAGE_LEN; i++) {
+				sprintf(buffer, "%d, ", i);
+				console_write(buffer, 2);
+			}
+			console_write("\r\n", 2);
+			for(int i = 0; i< MESSAGE_LEN; i++) {
+				sprintf(buffer, "%d, ", message_trans[i]);
+				console_write(buffer, 2);
+			}
+			console_write("\r\n", 2);
 		
-	return;
-}
+			for(int i = 0; i< MESSAGE_LEN; i++) {
+				sprintf(buffer, "%d, ", message[i]);
+				console_write(buffer, 2);
+			}
+			console_write("\r\n", 2);
+			//pio_set(PIOA, PIO_PA31);//LRA
+			//delay_ms(1000);
+			//pio_clear(PIOA, PIO_PA31);//LRA
+			//NVIC_DisableIRQ(TC0_IRQn);
+			for(int i = 0; i < 4000; i++){
+				len = sprintf(buffer, "%d \r\n ", holder[i]);
+				console_write(buffer, len);
+			}
+			NVIC_DisableIRQ(TC0_IRQn);
+			return;
+		}		
+			
+		//}*/
+		if(global_counter >= 4000){
+			for(int i = 0; i < 4000; i++){
+				len = sprintf(buffer, "%d \r\n ", holder[i]);
+				console_write(buffer, len);
+			}
+			NVIC_DisableIRQ(TC0_IRQn);
+			return;
+		}//End if global counter
+		
+		if(!message_done ) {
+			NVIC_EnableIRQ(TC0_IRQn);
+			return;
+		}
+}//End moving average
 
 void moving_average(void){
 	
 	int sum;
-	for(int i = 0; i < MESSAGE_LEN; i++){
-		sum = 0;
-		for(int j = 0; j < BAUD_LEN_SAMPLES; j++){
-			sum+= (RESONANT_BIN[+BAUD_LEN_SAMPLES*i+j]>>4);
-		}	
-		sum = sum/BAUD_LEN_SAMPLES; 
-		summer[i] = sum;
-		sprintf(buffer, "sum[%d] = %d \r\n ", i, sum);
-		console_write(buffer, sizeof(buffer));
-		if (sum > 2500000)
-		{
-			message_trans[i] = 1;
-			if((summer[i-1] - sum) > 2000000){
-					message_trans[i] = 0;
-			}
-		}
-		else {
-			message_trans[i] = 0;
-			if((sum -summer[i-1]) > 2000000) {
-				message_trans[i] = 1;
-			}
-		}
-	}//End for MESSAGE_LEN
-	message_trans[0] = 1;
+	
+	arm_mean_q31(ring_buffer, BAUD_LEN_SAMPLES, &sum_mean);
+	summer[message_counter] = sum_mean;
+	
+	len = sprintf(buffer, "sum[%d] = %d \r\n ", message_counter, sum_mean);
+	console_write(buffer, len);
+	//if (sum > 2500000)
+	if (sum_mean > high_mean/2)
+	{
+		message_trans[message_counter] = 1;
+		//len = sprintf(buffer, "sum[%d] = %d \r\n ", message_trans);
+		//console_write(buffer, len);
+		/*if((summer[message_counter-1] - sum_mean) > BIT_VARY/5){
+				len = sprintf(buffer, "overrdiing to zero \r\n ");
+				console_write(buffer, len);
+			
+				message_trans[message_counter] = 0;
+		}*/
+	}
+	else {
+		message_trans[message_counter] = 0;
+		/*if((sum_mean -summer[message_counter-1]) > BIT_VARY/5) {
+			message_trans[message_counter] = 1;
+				len = sprintf(buffer, "overrdiing to one \r\n ");
+				console_write(buffer, len);
+		}*/
+	}
+	
+	message_counter++;
+	if (message_counter > MESSAGE_LEN) {
+		len = sprintf(buffer, "MESSAGE DONE @ %d\r\n ", message_counter);
+		console_write(buffer, len);
+		message_done = 1; 
+		NVIC_DisableIRQ(TC0_IRQn);
+	}
+	//message_trans[0] = 1;
+	return;
 }//End moving average
 
 void system_clock_begin(void){
