@@ -1,7 +1,7 @@
 Rumblecation
 =======
 
-![Vibratory Communication Device](https://raw.githubusercontent.com/lab11/rumblecation/media/rumblecation.JPG)
+![Vibratory Communication Device](https://raw.githubusercontent.com/lab11/rumblecation/master/media/rumblecation.JPG)
 
 Mobile phones have vibratory motors which can transmit vibration, and 
 accelerometers, which can sense vibration. Rumblecation takes advantage
